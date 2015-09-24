@@ -1,6 +1,8 @@
-exception Error of string
-
 module Make(IO : Make.IO)(Client : module type of Client.Make(IO)) : sig
+
+  val debug : bool ref
+
+  exception Error of string
 
   type with_connection = {
     with_connection: 'a. (Client.connection -> 'a IO.t) -> 'a IO.t;
@@ -17,11 +19,13 @@ module Make(IO : Make.IO)(Client : module type of Client.Make(IO)) : sig
         in the same function body with two different types as argument.
     *)
 
+  type lock_state
+
   val acquire :
     ?atime:float ->
     ?ltime:int ->
     with_connection ->
-    string -> string -> unit IO.t
+    string -> string -> lock_state IO.t
     (** [acquire with_connection mutex_name unique_name]
         tries to acquire a lock exclusively, retrying with exponential
         backoff for [atime] seconds.
@@ -29,10 +33,9 @@ module Make(IO : Make.IO)(Client : module type of Client.Make(IO)) : sig
         unless released earlier.
     *)
 
-  val release : Client.connection -> string -> string -> unit IO.t
-    (** [release conn mutex mutex_name unique_name] releases
-        the mutex if possible. [unique_name] must match
-        the value given when acquiring the mutex. *)
+  val release : Client.connection -> lock_state -> unit IO.t
+    (** [release conn lock_state mutex mutex_name unique_name] releases
+        the mutex if possible. *)
 
   val with_mutex :
     ?atime:float ->
