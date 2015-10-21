@@ -132,6 +132,10 @@ module Make(IO : Make.IO)(Client : module type of Client.Make(IO)) = struct
       )
     )
 
+  (* Multiply x by a random factor between 0.75 and 1.25 *)
+  let blur x =
+    (0.75 +. Random.float 0.5) *. x
+
   let acquire ?(atime=10.) ?(ltime=10) with_connection lock_name owner_id =
     if not (ltime > 0) then
       invalid_arg "Redis.Mutex.acquire: ltime";
@@ -140,18 +144,27 @@ module Make(IO : Make.IO)(Client : module type of Client.Make(IO)) = struct
 
     let etime = Unix.gettimeofday () +. atime in
 
-    let rec loop sleep_amount =
+    (*
+       Allow about 50 attempts to acquire the lock,
+       sleeping the following amount between attempts +/- 25%
+
+       For the default atime of 10 seconds, the delay is 200 ms.
+       We don't go below 50 ms.
+    *)
+    let base_sleep_amount = max 0.05 (atime /. 50.) in
+
+    let rec loop () =
       try_acquire ltime with_connection lock_name owner_id >>= function
       | Some lock_state ->
           IO.return lock_state
       | None ->
           if Unix.gettimeofday () < etime then
-            IO.sleep (min sleep_amount 5. +. Random.float 0.1) >>= fun () ->
-            loop (2. *. sleep_amount)
+            IO.sleep (blur base_sleep_amount) >>= fun () ->
+            loop ()
           else
             IO.fail (Error ("Could not acquire lock " ^ lock_name))
     in
-    loop 0.2
+    loop ()
 
   let release conn lock_state =
     (* Signal background job to not extend the lock's expiration time *)
